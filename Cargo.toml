@@ -1,0 +1,18 @@
+[workspace]
+resolver = "3"
+members = ["crates/photon", "crates/photon-cli", "crates/photon-wasm"]
+
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+license = "MIT"
+
+# Path tracing is pure number crunching: debug builds are ~30x slower.
+# Even `cargo run` (dev profile) gets optimized code for the tracer.
+[profile.dev.package.photon]
+opt-level = 3
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"

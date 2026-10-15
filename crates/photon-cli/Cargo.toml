@@ -1,0 +1,13 @@
+[package]
+name = "photon-cli"
+description = "Render Photon scenes to PNG using every CPU core"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "photon"
+path = "src/main.rs"
+
+[dependencies]
+photon = { path = "../photon" }

@@ -1,0 +1,709 @@
+<title>Photon Path Tracer</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: a darkroom. The render is the print on the easel; controls sit on a
+   narrow rail to its right (below it on phones); notes on the code follow. */
+:root {
+  color-scheme: dark;
+  --ground: #0e0d0c;      /* darkroom black, warm-biased */
+  --panel: #171513;
+  --line: #2b2723;
+  --ink: #ece6dd;
+  --ink-dim: #9d958a;
+  --tungsten: #ffb454;    /* the filament: the one accent */
+  --tungsten-dim: #ffb45426;
+  --font-display: "Bricolage Grotesque", "Avenir Next", system-ui, sans-serif;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --step-0: 0.875rem;
+  --step-1: 1rem;
+  --step-2: 1.25rem;
+  --step-4: clamp(2rem, 1.4rem + 2.6vw, 3.25rem);
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body {
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: var(--step-1);
+  line-height: 1.55;
+}
+.wrap {
+  max-width: 1320px;
+  margin: 0 auto;
+  padding-block: 20px 56px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid;
+  gap: 20px;
+}
+header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px 24px;
+}
+h1 {
+  font-family: var(--font-display);
+  font-size: var(--step-4);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  margin: 0;
+}
+h1 span { color: var(--tungsten); }
+.tagline { color: var(--ink-dim); margin: 0; max-width: 52ch; text-wrap: balance; }
+
+.studio {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 20px;
+  align-items: start;
+}
+@media (max-width: 900px) { .studio { grid-template-columns: minmax(0, 1fr); } }
+
+.easel { display: grid; gap: 10px; min-width: 0; }
+.viewport {
+  position: relative;
+  background: #000;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  overflow: hidden;
+  touch-action: none;
+  cursor: grab;
+  max-width: 100%;
+}
+.viewport.dragging { cursor: grabbing; }
+canvas { display: block; width: 100%; height: auto; }
+.focus-ring {
+  position: absolute;
+  width: 56px; height: 56px;
+  margin: -28px 0 0 -28px;
+  border: 1.5px solid var(--tungsten);
+  border-radius: 50%;
+  pointer-events: none;
+  opacity: 0;
+}
+.focus-ring.show { animation: focus 900ms ease-out; }
+@keyframes focus {
+  0% { opacity: 1; transform: scale(1.6); }
+  40% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1); }
+}
+.overlay {
+  position: absolute; inset: 0;
+  display: grid; place-items: center;
+  padding: 24px;
+  text-align: center;
+  color: var(--ink-dim);
+  background: var(--ground);
+}
+.overlay strong { color: var(--ink); display: block; font-family: var(--font-display); font-size: var(--step-2); }
+
+.readout {
+  display: flex; flex-wrap: wrap; gap: 6px 22px;
+  font-family: var(--font-mono);
+  font-size: var(--step-0);
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+}
+.readout b { color: var(--ink); font-weight: 500; }
+.readout .state { color: var(--tungsten); }
+.hint { font-size: var(--step-0); color: var(--ink-dim); margin: 0; }
+kbd {
+  font-family: var(--font-mono); font-size: 0.8em;
+  border: 1px solid var(--line); border-radius: 3px; padding: 0 4px;
+}
+
+.rail {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  display: grid;
+}
+.rail section { padding: 16px; display: grid; gap: 12px; }
+.rail section + section { border-top: 1px solid var(--line); }
+.label {
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  margin: 0;
+}
+.scenes { display: grid; gap: 6px; }
+.scene {
+  font: inherit;
+  text-align: left;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 8px 10px;
+  cursor: pointer;
+  display: grid;
+  gap: 2px;
+}
+.scene small { color: var(--ink-dim); font-size: 0.78rem; line-height: 1.35; }
+.scene .name { font-family: var(--font-display); font-weight: 500; text-transform: capitalize; }
+.scene:hover { border-color: var(--ink-dim); }
+.scene[aria-pressed="true"] { border-color: var(--tungsten); background: var(--tungsten-dim); }
+
+.field { display: grid; gap: 4px; }
+.field-head { display: flex; justify-content: space-between; font-size: var(--step-0); }
+.field-head output { font-family: var(--font-mono); color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+input[type="range"] { width: 100%; accent-color: var(--tungsten); }
+
+.segmented { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--line); border-radius: 3px; overflow: hidden; }
+.segmented button {
+  font: inherit; font-size: var(--step-0);
+  background: transparent; color: var(--ink-dim);
+  border: 0; padding: 6px 0; cursor: pointer;
+}
+.segmented button + button { border-left: 1px solid var(--line); }
+.segmented button[aria-pressed="true"] { background: var(--tungsten-dim); color: var(--ink); }
+.actions { display: flex; gap: 8px; }
+.btn {
+  flex: 1;
+  font: inherit; font-size: var(--step-0);
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 7px 10px;
+  cursor: pointer;
+}
+.btn:hover { border-color: var(--ink-dim); }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--tungsten); outline-offset: 2px; }
+
+.notes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  gap: 28px;
+  border-top: 1px solid var(--line);
+  padding-top: 28px;
+}
+.notes h2 {
+  font-family: var(--font-display);
+  font-size: var(--step-2);
+  font-weight: 500;
+  margin: 0 0 8px;
+  text-wrap: balance;
+}
+.notes p { margin: 0 0 10px; color: var(--ink-dim); max-width: 65ch; }
+.notes p b { color: var(--ink); font-weight: 500; }
+.concepts { width: 100%; border-collapse: collapse; font-size: var(--step-0); }
+.concepts td { padding: 5px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+.concepts td:first-child { color: var(--ink); padding-right: 12px; }
+.concepts td:last-child { font-family: var(--font-mono); color: var(--tungsten); white-space: nowrap; text-align: right; }
+code { font-family: var(--font-mono); font-size: 0.9em; color: var(--ink); }
+
+@media (prefers-reduced-motion: reduce) {
+  .focus-ring.show { animation-duration: 1ms; }
+}
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Photon<span>.</span></h1>
+    <p class="tagline">A physically based path tracer written in Rust, compiled to WebAssembly, running on every core of your machine.</p>
+  </header>
+
+  <div class="studio">
+    <div class="easel">
+      <div class="viewport" id="viewport">
+        <canvas id="canvas" width="960" height="540" aria-label="Rendered scene. Drag to orbit, scroll to zoom, click to focus."></canvas>
+        <div class="focus-ring" id="focus-ring"></div>
+        <div class="overlay" id="overlay"><div><strong>Loading the renderer</strong>Compiling 80 KB of WebAssembly</div></div>
+      </div>
+      <div class="readout" aria-live="off">
+        <span><b id="stat-spp">0</b> samples/pixel</span>
+        <span><b id="stat-rate">0.00</b> M paths/s</span>
+        <span><b id="stat-workers">0</b> workers</span>
+        <span><b id="stat-res">0×0</b></span>
+        <span class="state" id="stat-state">starting</span>
+      </div>
+      <p class="hint">Drag to orbit · scroll or pinch to zoom · click anything to focus on it · <kbd>1</kbd>–<kbd>4</kbd> switch scenes · <kbd>Space</kbd> pauses</p>
+    </div>
+
+    <aside class="rail" aria-label="Render controls">
+      <section>
+        <p class="label">Scene</p>
+        <div class="scenes" id="scenes"></div>
+      </section>
+      <section>
+        <p class="label">Lens</p>
+        <div class="field">
+          <div class="field-head"><label for="aperture">Aperture</label><output id="aperture-out" for="aperture">pinhole</output></div>
+          <input type="range" id="aperture" min="0" max="100" value="20">
+        </div>
+        <div class="field">
+          <div class="field-head"><label for="fov">Field of view</label><output id="fov-out" for="fov">40°</output></div>
+          <input type="range" id="fov" min="12" max="90" value="40">
+        </div>
+      </section>
+      <section>
+        <p class="label">Light</p>
+        <div class="field">
+          <div class="field-head"><label for="exposure">Exposure</label><output id="exposure-out" for="exposure">0.0 EV</output></div>
+          <input type="range" id="exposure" min="-30" max="30" value="0">
+        </div>
+        <div class="field">
+          <div class="field-head"><label for="depth">Max bounces</label><output id="depth-out" for="depth">8</output></div>
+          <input type="range" id="depth" min="1" max="24" value="8">
+        </div>
+      </section>
+      <section>
+        <p class="label">Resolution</p>
+        <div class="segmented" id="quality" role="group" aria-label="Resolution">
+          <button type="button" data-w="480" id="q-480">480</button>
+          <button type="button" data-w="800" id="q-800">800</button>
+          <button type="button" data-w="1280" id="q-1280">1280</button>
+        </div>
+        <div class="actions">
+          <button type="button" class="btn" id="reset">Reset camera</button>
+          <button type="button" class="btn" id="pause">Pause</button>
+        </div>
+      </section>
+    </aside>
+  </div>
+
+  <div class="notes">
+    <div>
+      <h2>What you are looking at</h2>
+      <p>Every pixel is the average of many random light paths. Each path leaves the camera, bounces off matte walls, reflects off metal and refracts through glass until it reaches a light. One path per pixel looks like static. A few hundred converge to soft shadows, colour bleeding, caustics under the glass and real depth of field.</p>
+      <p>The image sharpens the longer you leave it still. Move the camera and it starts over at low resolution so you can aim, then refines.</p>
+    </div>
+    <div>
+      <h2>How the browser runs Rust</h2>
+      <p>The tracer is a Rust library with no dependencies. The same code builds a native command-line renderer and this <b>80 KB WebAssembly module</b>, which talks to JavaScript through about a dozen plain <code>extern "C"</code> functions. No <code>wasm-bindgen</code>.</p>
+      <p>One Web Worker per CPU core renders strips of rows. The page adds their results into a buffer inside the module's own memory and calls <code>tonemap()</code> to turn it into pixels. Each sample's random seed comes from its pixel and index, so it never matters which worker drew what.</p>
+    </div>
+    <div>
+      <h2>Rust ideas, by file</h2>
+      <table class="concepts">
+        <tr><td>Operator overloading, <code>macro_rules!</code></td><td>vec3.rs</td></tr>
+        <tr><td>Enums vs trait objects, <code>Option</code></td><td>shape.rs</td></tr>
+        <tr><td>Flat-array trees, generic closures</td><td>bvh.rs</td></tr>
+        <tr><td>Newtypes, builders, <code>let … else</code></td><td>scene.rs</td></tr>
+        <tr><td>Scoped threads, atomics, channels</td><td>photon-cli</td></tr>
+        <tr><td>Bit twiddling, <code>const</code> tables</td><td>png.rs</td></tr>
+        <tr><td>FFI, <code>#[repr(C)]</code>, <code>thread_local!</code></td><td>photon-wasm</td></tr>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+const WASM_BASE64 = "__PHOTON_WASM_BASE64__";
+
+// ---------------------------------------------------------------------------
+// Worker: owns its own instance of the module and renders bands of rows.
+// ---------------------------------------------------------------------------
+const WORKER_SOURCE = `
+let wasm = null;
+onmessage = async (e) => {
+  const m = e.data;
+  if (m.type === "init") {
+    wasm = (await WebAssembly.instantiate(m.module, {})).exports;
+    postMessage({ type: "ready" });
+  } else if (m.type === "config") {
+    wasm.configure(m.scene, m.width, m.height, m.depth);
+    wasm.set_camera(...m.cam);
+    this.width = m.width;
+  } else if (m.type === "task") {
+    const ptr = wasm.render_band(m.r0, m.r1, m.sample);
+    const len = (m.r1 - m.r0) * this.width * 3;
+    const data = new Float32Array(wasm.memory.buffer, ptr, len).slice();
+    postMessage({ type: "result", gen: m.gen, r0: m.r0, r1: m.r1, data }, [data.buffer]);
+  }
+};`;
+
+// If workers are unavailable, the main thread renders in small time slices
+// through the same message interface.
+class LocalWorker {
+  constructor(wasm) { this.wasm = wasm; this.onmessage = null; this.width = 1; }
+  postMessage(m) {
+    if (m.type === "config") { this.width = m.width; return; } // shares main config
+    if (m.type !== "task") return;
+    setTimeout(() => {
+      const ptr = this.wasm.render_band(m.r0, m.r1, m.sample);
+      const len = (m.r1 - m.r0) * this.width * 3;
+      const data = new Float32Array(this.wasm.memory.buffer, ptr, len).slice();
+      this.onmessage?.({ data: { type: "result", gen: m.gen, r0: m.r0, r1: m.r1, data } });
+    }, 0);
+  }
+}
+
+const $ = (id) => document.getElementById(id);
+const canvas = $("canvas");
+const ctx = canvas.getContext("2d");
+// Renders land in an offscreen buffer at render resolution, then get scaled
+// onto the visible canvas, so low-res previews never blank the display.
+const buffer = document.createElement("canvas");
+const bctx = buffer.getContext("2d");
+const viewport = $("viewport");
+
+const state = {
+  scene: 0,
+  scenes: [],
+  cam: null,           // [fx,fy,fz, ax,ay,az, vfov, aperture, focus]
+  defaultCam: null,
+  baseWidth: 800,
+  previewScale: 1,
+  depth: 8,
+  exposure: 1,
+  paused: false,
+  gen: 0,
+  width: 0, height: 0,
+  band: 8, bands: 0, nextBand: 0, cycle: 0,
+  workers: [],
+  dirty: false,
+  bandsDone: 0,
+  autoPaused: false,
+  pathsDone: 0,
+  rateWindow: [],
+};
+const MAX_SPP = 4096;
+const IN_FLIGHT = 2;
+
+let wasm; // main-thread instance: accumulation, tone mapping, picking
+
+async function boot() {
+  const bytes = Uint8Array.from(atob(WASM_BASE64), (c) => c.charCodeAt(0));
+  const module = await WebAssembly.compile(bytes);
+  wasm = (await WebAssembly.instantiate(module, {})).exports;
+
+  const decoder = new TextDecoder();
+  for (let i = 0; i < wasm.scene_count(); i++) {
+    const ptr = wasm.scene_info(i);
+    const [name, description] = decoder.decode(new Uint8Array(wasm.memory.buffer, ptr, wasm.text_len())).split("\n");
+    state.scenes.push({ name, description });
+  }
+  buildSceneButtons();
+
+  const cores = Math.max(1, Math.min(16, (navigator.hardwareConcurrency || 4) - 1 || 1));
+  try {
+    const url = URL.createObjectURL(new Blob([WORKER_SOURCE], { type: "text/javascript" }));
+    const ready = [];
+    for (let i = 0; i < cores; i++) {
+      const w = new Worker(url);
+      ready.push(new Promise((res, rej) => {
+        w.onerror = rej;
+        w.onmessage = (e) => { if (e.data.type === "ready") res(w); };
+      }));
+      w.postMessage({ type: "init", module });
+    }
+    state.workers = await withTimeout(Promise.all(ready), 4000);
+  } catch (err) {
+    console.warn("Web Workers unavailable, rendering on the main thread", err);
+    state.workers = [new LocalWorker(wasm)];
+  }
+  for (const w of state.workers) {
+    w.inFlight = 0;
+    w.onmessage = (e) => onResult(w, e.data);
+  }
+  $("stat-workers").textContent = state.workers.length;
+  $("overlay").hidden = true;
+
+  selectScene(0);
+  requestAnimationFrame(frame);
+}
+
+function withTimeout(p, ms) {
+  return Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), ms))]);
+}
+
+// ---------------------------------------------------------------------------
+// Scheduling: hand out (band, sample) tasks round robin to keep every worker
+// busy. A generation counter discards results from before a camera change.
+// ---------------------------------------------------------------------------
+function restart() {
+  const aspect = state.scenes[state.scene].name === "cornell" ? 1 : 16 / 9;
+  const width = Math.max(64, Math.round(state.baseWidth * state.previewScale));
+  const height = Math.round(width / aspect);
+  state.gen++;
+  state.width = width;
+  state.height = height;
+  state.band = Math.max(2, Math.round(16 * 360 / height / (state.previewScale < 1 ? 1 : 2)));
+  state.bands = Math.ceil(height / state.band);
+  state.nextBand = 0;
+  state.cycle = 0;
+  state.bandsDone = 0;
+  buffer.width = width;
+  buffer.height = height;
+  const displayW = state.baseWidth, displayH = Math.round(displayW / aspect);
+  if (canvas.width !== displayW || canvas.height !== displayH) {
+    canvas.width = displayW;
+    canvas.height = displayH;
+  }
+  wasm.configure(state.scene, width, height, state.depth);
+  wasm.set_camera(...state.cam);
+  const config = { type: "config", scene: state.scene, width, height, depth: state.depth, cam: state.cam };
+  for (const w of state.workers) {
+    w.postMessage(config);
+    w.inFlight = 0; // old tasks still in flight are ignored by generation
+  }
+  $("stat-res").textContent = `${width}×${height}`;
+  for (const w of state.workers) pump(w);
+}
+
+function pump(w) {
+  while (!state.paused && w.inFlight < IN_FLIGHT && state.cycle < MAX_SPP) {
+    const b = state.nextBand;
+    const r0 = b * state.band;
+    const r1 = Math.min(state.height, r0 + state.band);
+    w.postMessage({ type: "task", gen: state.gen, r0, r1, sample: state.cycle });
+    w.inFlight++;
+    if (++state.nextBand >= state.bands) { state.nextBand = 0; state.cycle++; }
+  }
+}
+
+function onResult(w, m) {
+  if (m.type !== "result") return;
+  if (m.gen !== state.gen) { pump(w); return; }
+  w.inFlight = Math.max(0, w.inFlight - 1);
+  const W = state.width;
+  // Views must be recreated: memory.buffer changes if the module grows it.
+  const accum = new Float32Array(wasm.memory.buffer, wasm.accum_ptr(), W * state.height * 3);
+  const counts = new Uint32Array(wasm.memory.buffer, wasm.counts_ptr(), state.height);
+  const base = m.r0 * W * 3;
+  const d = m.data;
+  for (let i = 0; i < d.length; i++) accum[base + i] += d[i];
+  for (let r = m.r0; r < m.r1; r++) counts[r]++;
+  state.pathsDone += (m.r1 - m.r0) * W;
+  state.bandsDone++;
+  // Present only once every row has at least one sample.
+  if (state.bandsDone >= state.bands) state.dirty = true;
+  pump(w);
+}
+
+// ---------------------------------------------------------------------------
+// Display loop
+// ---------------------------------------------------------------------------
+let lastStats = 0, lastPresent = 0, presentCost = 0;
+function frame(now) {
+  // Tone mapping a full frame costs real main-thread time, and the main
+  // thread also has to keep feeding the workers. So present at most once per
+  // ~6x the measured cost (previews, being small and urgent, always present).
+  const due = state.previewScale < 1 || now - lastPresent >= presentCost * 6;
+  if (state.dirty && due) {
+    state.dirty = false;
+    lastPresent = now;
+    const ptr = wasm.tonemap(state.exposure);
+    const px = new Uint8ClampedArray(wasm.memory.buffer, ptr, state.width * state.height * 4);
+    bctx.putImageData(new ImageData(new Uint8ClampedArray(px), state.width, state.height), 0, 0);
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(buffer, 0, 0, canvas.width, canvas.height);
+    presentCost = 0.8 * presentCost + 0.2 * (performance.now() - now);
+  }
+  if (now - lastStats > 250) {
+    lastStats = now;
+    state.rateWindow.push({ t: now, n: state.pathsDone });
+    while (state.rateWindow.length > 8) state.rateWindow.shift();
+    const a = state.rateWindow[0], b = state.rateWindow[state.rateWindow.length - 1];
+    const rate = b.t > a.t ? (b.n - a.n) / ((b.t - a.t) / 1000) / 1e6 : 0;
+    const counts = new Uint32Array(wasm.memory.buffer, wasm.counts_ptr(), state.height);
+    let spp = Infinity;
+    for (let i = 0; i < counts.length; i++) spp = Math.min(spp, counts[i]);
+    $("stat-spp").textContent = spp === Infinity ? 0 : spp;
+    $("stat-rate").textContent = rate.toFixed(2);
+    $("stat-state").textContent = state.paused ? "paused"
+      : state.previewScale < 1 ? "previewing"
+      : spp >= MAX_SPP ? "converged" : "refining";
+  }
+  requestAnimationFrame(frame);
+}
+
+// ---------------------------------------------------------------------------
+// Scene, camera and controls
+// ---------------------------------------------------------------------------
+function buildSceneButtons() {
+  const box = $("scenes");
+  state.scenes.forEach((s, i) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "scene";
+    b.id = `scene-${s.name}`;
+    b.innerHTML = `<span class="name"></span><small></small>`;
+    b.querySelector(".name").textContent = s.name;
+    b.querySelector("small").textContent = s.description;
+    b.addEventListener("click", () => selectScene(i));
+    box.appendChild(b);
+  });
+}
+
+function selectScene(i) {
+  state.scene = i;
+  wasm.configure(i, 4, 4, state.depth);
+  state.defaultCam = Array.from(new Float32Array(wasm.memory.buffer, wasm.camera_ptr(), 9));
+  state.cam = state.defaultCam.slice();
+  document.querySelectorAll(".scene").forEach((b, j) => b.setAttribute("aria-pressed", String(j === i)));
+  syncLensControls();
+  restart();
+}
+
+// Aperture slider maps to a lens diameter relative to the scene's scale.
+function maxAperture() { return state.defaultCam[8] * 0.06; }
+function syncLensControls() {
+  const [, , , , , , vfov, aperture] = state.cam;
+  $("aperture").value = Math.round(Math.sqrt(aperture / maxAperture()) * 100);
+  $("fov").value = Math.round(vfov);
+  updateLensLabels();
+}
+function updateLensLabels() {
+  const open = Math.sqrt(state.cam[7] / maxAperture());
+  $("aperture-out").textContent = open > 0.005 ? `${Math.round(open * 100)}% open` : "pinhole";
+  $("fov-out").textContent = `${Math.round(state.cam[6])}°`;
+}
+
+$("aperture").addEventListener("input", (e) => {
+  const t = e.target.value / 100;
+  state.cam[7] = t * t * maxAperture();
+  updateLensLabels();
+  restart();
+});
+$("fov").addEventListener("input", (e) => {
+  state.cam[6] = Number(e.target.value);
+  updateLensLabels();
+  restart();
+});
+$("exposure").addEventListener("input", (e) => {
+  const ev = e.target.value / 10;
+  state.exposure = Math.pow(2, ev);
+  $("exposure-out").textContent = `${ev >= 0 ? "+" : ""}${ev.toFixed(1)} EV`;
+  if (state.bandsDone >= state.bands) state.dirty = true; // tone mapping only: no re-render
+});
+$("depth").addEventListener("input", (e) => {
+  state.depth = Number(e.target.value);
+  $("depth-out").textContent = state.depth;
+  restart();
+});
+document.querySelectorAll("#quality button").forEach((b) => {
+  b.addEventListener("click", () => setQuality(Number(b.dataset.w)));
+});
+function setQuality(w) {
+  state.baseWidth = w;
+  document.querySelectorAll("#quality button").forEach((b) => b.setAttribute("aria-pressed", String(Number(b.dataset.w) === w)));
+  if (wasm) restart();
+}
+$("reset").addEventListener("click", () => {
+  state.cam = state.defaultCam.slice();
+  syncLensControls();
+  restart();
+});
+function togglePause() {
+  state.paused = !state.paused;
+  $("pause").textContent = state.paused ? "Resume" : "Pause";
+  if (!state.paused) for (const w of state.workers) pump(w);
+}
+$("pause").addEventListener("click", togglePause);
+document.addEventListener("keydown", (e) => {
+  if (e.target.closest("input, button") && e.key === " ") return;
+  if (e.key >= "1" && e.key <= String(state.scenes.length)) selectScene(Number(e.key) - 1);
+  if (e.key === " ") { e.preventDefault(); togglePause(); }
+});
+
+// Orbit the camera around its look-at point.
+function orbit(dYaw, dPitch, zoom) {
+  const c = state.cam;
+  let dx = c[0] - c[3], dy = c[1] - c[4], dz = c[2] - c[5];
+  let r = Math.hypot(dx, dy, dz);
+  let yaw = Math.atan2(dx, dz);
+  let pitch = Math.asin(dy / r);
+  yaw -= dYaw;
+  pitch = Math.max(-1.45, Math.min(1.45, pitch + dPitch));
+  const newR = Math.max(0.05 * state.defaultCam[8], r * zoom);
+  c[8] *= newR / r; // keep the same thing in focus while zooming
+  r = newR;
+  c[0] = c[3] + r * Math.cos(pitch) * Math.sin(yaw);
+  c[1] = c[4] + r * Math.sin(pitch);
+  c[2] = c[5] + r * Math.cos(pitch) * Math.cos(yaw);
+}
+
+let settleTimer = 0;
+function interacting() {
+  state.previewScale = 0.4;
+  clearTimeout(settleTimer);
+  settleTimer = setTimeout(() => { state.previewScale = 1; restart(); }, 180);
+  restart();
+}
+
+const pointers = new Map();
+let dragDistance = 0, pinchStart = 0;
+viewport.addEventListener("pointerdown", (e) => {
+  viewport.setPointerCapture(e.pointerId);
+  pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  dragDistance = 0;
+  if (pointers.size === 2) {
+    const [a, b] = [...pointers.values()];
+    pinchStart = Math.hypot(a.x - b.x, a.y - b.y);
+  }
+  viewport.classList.add("dragging");
+});
+viewport.addEventListener("pointermove", (e) => {
+  const p = pointers.get(e.pointerId);
+  if (!p) return;
+  const dx = e.clientX - p.x, dy = e.clientY - p.y;
+  p.x = e.clientX; p.y = e.clientY;
+  dragDistance += Math.abs(dx) + Math.abs(dy);
+  if (pointers.size === 1 && dragDistance > 4) {
+    orbit(dx * 0.006, dy * 0.006, 1);
+    interacting();
+  } else if (pointers.size === 2) {
+    const [a, b] = [...pointers.values()];
+    const d = Math.hypot(a.x - b.x, a.y - b.y);
+    if (pinchStart > 0) { orbit(0, 0, pinchStart / d); interacting(); }
+    pinchStart = d;
+  }
+});
+function endPointer(e) {
+  const wasClick = pointers.size === 1 && dragDistance <= 4 && e.type === "pointerup";
+  pointers.delete(e.pointerId);
+  if (pointers.size === 0) viewport.classList.remove("dragging");
+  if (wasClick) focusAt(e);
+}
+viewport.addEventListener("pointerup", endPointer);
+viewport.addEventListener("pointercancel", endPointer);
+viewport.addEventListener("wheel", (e) => {
+  e.preventDefault();
+  orbit(0, 0, Math.exp(e.deltaY * 0.0012));
+  interacting();
+}, { passive: false });
+
+function focusAt(e) {
+  const rect = canvas.getBoundingClientRect();
+  const sx = (e.clientX - rect.left) / rect.width;
+  const sy = (e.clientY - rect.top) / rect.height;
+  const d = wasm.pick(sx, sy);
+  if (d <= 0) return;
+  state.cam[8] = d;
+  if (state.cam[7] === 0) state.cam[7] = 0.25 * maxAperture(); // make the effect visible
+  syncLensControls();
+  const ring = $("focus-ring");
+  ring.style.left = `${e.clientX - viewport.getBoundingClientRect().left}px`;
+  ring.style.top = `${e.clientY - viewport.getBoundingClientRect().top}px`;
+  ring.classList.remove("show");
+  void ring.offsetWidth; // restart the animation
+  ring.classList.add("show");
+  restart();
+}
+
+// Stop burning CPU while the tab is hidden, without overriding a manual pause.
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden && !state.paused) { state.autoPaused = true; togglePause(); }
+  else if (!document.hidden && state.autoPaused) { state.autoPaused = false; togglePause(); }
+});
+
+setQuality(window.innerWidth < 600 ? 480 : 800);
+boot().catch((err) => {
+  console.error(err);
+  $("overlay").hidden = false;
+  $("overlay").innerHTML = "<div><strong>The renderer could not start</strong>This browser blocked WebAssembly on this page. Try a current version of Chrome, Firefox or Safari.</div>";
+});
+</script>

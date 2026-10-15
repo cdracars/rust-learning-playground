@@ -1,0 +1,8 @@
+[package]
+name = "photon"
+description = "A small, dependency-free physically based path tracer"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]

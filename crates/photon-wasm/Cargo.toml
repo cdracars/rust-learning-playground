@@ -1,0 +1,12 @@
+[package]
+name = "photon-wasm"
+description = "Photon compiled to WebAssembly with a tiny hand-written FFI"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+photon = { path = "../photon" }
